@@ -1,8 +1,8 @@
 namespace TextToVideo.Api.Models;
 
-public sealed class WordTiming
+public class WordTiming
 {
-    public required string Word { get; init; }
-    public double StartSeconds { get; init; }
+    public string Word { get; set; } = "";
+    public double StartSeconds { get; set; }
     public double EndSeconds { get; set; }
 }

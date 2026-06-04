@@ -30,27 +30,59 @@ public sealed class VideoGenerationService : IVideoGenerationService
         _logger = logger;
     }
 
-    public async Task<string> GenerateAsync(IFormFile file, string? voiceName, CancellationToken cancellationToken)
+    public async Task<string> GenerateAsync(
+    IFormFile file,
+    string? voiceName,
+    CancellationToken cancellationToken)
+{
+    var jobId = Guid.NewGuid().ToString("N");
+
+    var outputsRoot = Path.Combine(_environment.ContentRootPath, "outputs");
+    var jobDirectory = Path.Combine(outputsRoot, jobId);
+
+    Directory.CreateDirectory(jobDirectory);
+
+    try
     {
-        var jobId = Guid.NewGuid().ToString("N");
-        var outputsRoot = Path.Combine(_environment.ContentRootPath, "outputs");
-        var jobDirectory = Path.Combine(outputsRoot, jobId);
-        Directory.CreateDirectory(jobDirectory);
+        var text = await _textFileService.ReadTextAsync(file, cancellationToken);
 
-        try
-        {
-            var text = await _textFileService.ReadTextAsync(file, cancellationToken);
-            var selectedVoice = string.IsNullOrWhiteSpace(voiceName) ? "en-US-JennyNeural" : voiceName.Trim();
-            var speech = await _speechService.GenerateSpeechAsync(text, selectedVoice, jobDirectory, cancellationToken);
-            var framesDirectory = await _videoRenderService.RenderFramesAsync(text, speech.WordTimings, speech.DurationSeconds, jobDirectory, cancellationToken);
-            await _ffmpegService.CreateVideoAsync(framesDirectory, speech.AudioPath, jobDirectory, cancellationToken);
+        var selectedVoice = string.IsNullOrWhiteSpace(voiceName)
+            ? "en-US-JennyNeural"
+            : voiceName.Trim();
 
-            return $"/outputs/{jobId}/final.mp4";
-        }
-        catch
-        {
-            _logger.LogWarning("Video job {JobId} failed. Keeping output folder for troubleshooting: {JobDirectory}", jobId, jobDirectory);
-            throw;
-        }
+        var audioPath = Path.Combine(jobDirectory, "audio.mp3");
+        var subtitlePath = Path.Combine(jobDirectory, "subtitles.vtt");
+var speechResult = await _speechService.GenerateSpeechAsync(
+    text,
+    audioPath,
+    subtitlePath,
+    selectedVoice,
+    cancellationToken);
+
+        var framesDirectory = await _videoRenderService.RenderFramesAsync(
+            text,
+            speechResult.WordTimings,
+            speechResult.DurationSeconds,
+            jobDirectory,
+            cancellationToken);
+
+        await _ffmpegService.CreateVideoAsync(
+            framesDirectory,
+            speechResult.AudioPath,
+            jobDirectory,
+            cancellationToken);
+
+        return $"/outputs/{jobId}/final.mp4";
     }
+    catch (Exception ex)
+    {
+        _logger.LogError(
+            ex,
+            "Video job {JobId} failed. Keeping output folder for troubleshooting: {JobDirectory}",
+            jobId,
+            jobDirectory);
+
+        throw;
+    }
+}
 }
