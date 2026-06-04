@@ -1,8 +1,8 @@
 namespace TextToVideo.Api.Models;
 
-public sealed class SpeechResult
+public class SpeechResult
 {
-    public required string AudioPath { get; init; }
-    public required IReadOnlyList<WordTiming> WordTimings { get; init; }
-    public double DurationSeconds { get; init; }
+    public string AudioPath { get; set; } = "";
+    public List<WordTiming> WordTimings { get; set; } = new();
+    public double DurationSeconds { get; set; }
 }

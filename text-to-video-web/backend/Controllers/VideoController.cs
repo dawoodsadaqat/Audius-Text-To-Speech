@@ -46,7 +46,7 @@ public sealed class VideoController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new VideoGenerationResponse
             {
                 Success = false,
-                Error = "Video generation failed. Check Azure Speech settings, FFmpeg path, and backend logs for details."
+                Error = $"Video generation failed : {ex.Message}"
             });
         }
     }
