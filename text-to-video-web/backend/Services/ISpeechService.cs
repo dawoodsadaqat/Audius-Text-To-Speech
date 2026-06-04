@@ -8,5 +8,6 @@ public interface ISpeechService
         string text,
         string audioOutputPath,
         string subtitleOutputPath,
+        string voiceName,
         CancellationToken cancellationToken = default);
 }

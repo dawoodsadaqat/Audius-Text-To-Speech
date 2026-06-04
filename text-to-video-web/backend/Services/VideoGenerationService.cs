@@ -52,12 +52,12 @@ public sealed class VideoGenerationService : IVideoGenerationService
 
         var audioPath = Path.Combine(jobDirectory, "audio.mp3");
         var subtitlePath = Path.Combine(jobDirectory, "subtitles.vtt");
-
-        var speechResult = await _speechService.GenerateSpeechAsync(
-            text,
-            audioPath,
-            subtitlePath,
-            cancellationToken);
+var speechResult = await _speechService.GenerateSpeechAsync(
+    text,
+    audioPath,
+    subtitlePath,
+    selectedVoice,
+    cancellationToken);
 
         var framesDirectory = await _videoRenderService.RenderFramesAsync(
             text,

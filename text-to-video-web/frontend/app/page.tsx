@@ -9,6 +9,8 @@ const voices = [
   { value: "en-US-GuyNeural", label: "Guy - warm US English" },
   { value: "en-GB-SoniaNeural", label: "Sonia - British English" },
   { value: "en-AU-NatashaNeural", label: "Natasha - Australian English" },
+  { value: "pt-BR-FranciscaNeural",label: "Portuguese (Brazil) - Francisca"},
+  { value: "pt-BR-AntonioNeural",label: "Portuguese (Brazil) - Antonio"}
 ];
 
 const simulatedSteps = ["Uploading", "Generating voice", "Rendering video", "Finalizing video"];

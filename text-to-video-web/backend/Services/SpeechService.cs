@@ -17,11 +17,12 @@ public class SpeechService : ISpeechService
         _environment = environment;
     }
 
-    public async Task<SpeechResult> GenerateSpeechAsync(
-        string text,
-        string audioOutputPath,
-        string subtitleOutputPath,
-        CancellationToken cancellationToken = default)
+   public async Task<SpeechResult> GenerateSpeechAsync(
+    string text,
+    string audioOutputPath,
+    string subtitleOutputPath,
+    string voiceName,
+    CancellationToken cancellationToken = default)
     {
         var jobDirectory = Path.GetDirectoryName(audioOutputPath)
             ?? throw new Exception("Invalid audio output path.");
@@ -40,7 +41,7 @@ public class SpeechService : ISpeechService
             File.Delete(wordTimingJsonPath);
 
         var pythonCommand = _configuration["EdgeTts:PythonCommand"] ?? "python3";
-        var voiceName = _configuration["EdgeTts:VoiceName"] ?? "en-US-JennyNeural";
+       
 
         var scriptPath = Path.Combine(
             _environment.ContentRootPath,
@@ -102,7 +103,7 @@ public class SpeechService : ISpeechService
         {
             AudioPath = audioOutputPath,
             WordTimings = wordTimings,
-            DurationSeconds = wordTimings.Max(x => x.EndSeconds)
+            DurationSeconds = wordTimings.Max(x => x.EndSeconds) + 1.0
         };
     }
 }
