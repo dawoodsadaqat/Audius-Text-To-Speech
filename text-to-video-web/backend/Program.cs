@@ -12,8 +12,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendLocalhost", policy =>
     {
-        policy
-            .WithOrigins("http://localhost:3000")
+     policy.WithOrigins(
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://185.182.187.248:3001"
+            )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -38,7 +41,7 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new PhysicalFileProvider(outputsDirectory),
     RequestPath = "/outputs"
 });
-
+app.UseCors("Frontend");
 app.MapControllers();
 
 app.Run();
