@@ -1,8 +1,13 @@
+using Microsoft.AspNetCore.Http;
+
 namespace TextToVideo.Api.Services;
 
 public interface IVideoGenerationService
 {
-    Task<string> GenerateAsync(IFormFile file, string? voiceName, CancellationToken cancellationToken);
+    Task<string> GenerateAsync(
+        IFormFile file,
+        string? voiceName,
+        CancellationToken cancellationToken);
 }
 
 public sealed class VideoGenerationService : IVideoGenerationService
@@ -31,58 +36,83 @@ public sealed class VideoGenerationService : IVideoGenerationService
     }
 
     public async Task<string> GenerateAsync(
-    IFormFile file,
-    string? voiceName,
-    CancellationToken cancellationToken)
-{
-    var jobId = Guid.NewGuid().ToString("N");
-
-    var outputsRoot = Path.Combine(_environment.ContentRootPath, "outputs");
-    var jobDirectory = Path.Combine(outputsRoot, jobId);
-
-    Directory.CreateDirectory(jobDirectory);
-
-    try
+        IFormFile file,
+        string? voiceName,
+        CancellationToken cancellationToken)
     {
-        var text = await _textFileService.ReadTextAsync(file, cancellationToken);
+        var jobId = Guid.NewGuid().ToString("N");
 
-        var selectedVoice = string.IsNullOrWhiteSpace(voiceName)
-            ? "en-US-JennyNeural"
-            : voiceName.Trim();
+        var outputsRoot = Path.Combine(
+            _environment.ContentRootPath,
+            "outputs");
 
-        var audioPath = Path.Combine(jobDirectory, "audio.mp3");
-        var subtitlePath = Path.Combine(jobDirectory, "subtitles.vtt");
-var speechResult = await _speechService.GenerateSpeechAsync(
-    text,
-    audioPath,
-    subtitlePath,
-    selectedVoice,
-    cancellationToken);
+        Directory.CreateDirectory(outputsRoot);
 
-        var framesDirectory = await _videoRenderService.RenderFramesAsync(
-            text,
-            speechResult.WordTimings,
-            speechResult.DurationSeconds,
-            jobDirectory,
-            cancellationToken);
+        var jobDirectory = Path.Combine(
+            outputsRoot,
+            jobId);
 
-        await _ffmpegService.CreateVideoAsync(
-            framesDirectory,
-            speechResult.AudioPath,
-            jobDirectory,
-            cancellationToken);
+        Directory.CreateDirectory(jobDirectory);
 
-        return $"/outputs/{jobId}/final.mp4";
+        try
+        {
+            var text = await _textFileService.ReadTextAsync(
+                file,
+                cancellationToken);
+
+            var selectedVoice =
+                string.IsNullOrWhiteSpace(voiceName)
+                    ? "en-US-JennyNeural"
+                    : voiceName.Trim();
+
+            var audioPath = Path.Combine(
+                jobDirectory,
+                "audio.mp3");
+
+            var subtitlePath = Path.Combine(
+                jobDirectory,
+                "highlight.ass");
+
+            var speechResult =
+                await _speechService.GenerateSpeechAsync(
+                    text,
+                    audioPath,
+                    subtitlePath,
+                    selectedVoice,
+                    cancellationToken);
+
+            var assSubtitlePath =
+                await _videoRenderService.RenderFramesAsync(
+                    text,
+                    speechResult.WordTimings,
+                    speechResult.DurationSeconds,
+                    jobDirectory,
+                    cancellationToken);
+
+            await _ffmpegService.CreateVideoAsync(
+                assSubtitlePath,
+                speechResult.AudioPath,
+                jobDirectory,
+                cancellationToken);
+
+            return $"/outputs/{jobId}/final.mp4";
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "Video job {JobId} was cancelled.",
+                jobId);
+
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Video job {JobId} failed.",
+                jobId);
+
+            throw;
+        }
     }
-    catch (Exception ex)
-    {
-        _logger.LogError(
-            ex,
-            "Video job {JobId} failed. Keeping output folder for troubleshooting: {JobDirectory}",
-            jobId,
-            jobDirectory);
-
-        throw;
-    }
-}
 }
