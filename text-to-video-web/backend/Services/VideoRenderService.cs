@@ -35,11 +35,15 @@ public sealed class VideoRenderService : IVideoRenderService
     {
         var assPath = Path.Combine(jobDirectory, "highlight.ass");
 
-        _logger.LogInformation("Creating optimized ASS subtitle file.");
+        _logger.LogInformation("Creating paged ASS subtitle file.");
 
         var ass = BuildAssSubtitle(wordTimings, durationSeconds);
 
-        await File.WriteAllTextAsync(assPath, ass, Encoding.UTF8, cancellationToken);
+        await File.WriteAllTextAsync(
+            assPath,
+            ass,
+            Encoding.UTF8,
+            cancellationToken);
 
         return assPath;
     }
@@ -61,64 +65,89 @@ public sealed class VideoRenderService : IVideoRenderService
         sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
 
         // ASS color format: &HAABBGGRR
-        // PrimaryColour: highlighted orange
-        // SecondaryColour: normal black
-        sb.AppendLine("Style: Default,Arial,54,&H0000A5FF,&H00000000,&H00FFFFFF,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,5,60,60,60,1");
+        // PrimaryColour = active/highlight color
+        // SecondaryColour = normal text color
+        sb.AppendLine("Style: Default,Arial,58,&H0000A5FF,&H00000000,&H00FFFFFF,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,5,70,70,80,1");
         sb.AppendLine();
 
         sb.AppendLine("[Events]");
         sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
-        var start = "0:00:00.00";
-        var end = ToAssTime(durationSeconds + 1.0);
+        var pages = BuildTimedPages(
+            wordTimings,
+            maxWordsPerPage: 10);
 
-        var lines = BuildKaraokeLines(wordTimings, maxWordsPerLine: 7);
-        var dialogueText = string.Join(@"\N", lines);
+        foreach (var page in pages)
+        {
+            var start = ToAssTime(page.StartSeconds);
+            var end = ToAssTime(page.EndSeconds + 0.25);
+            var dialogueText = string.Join(" ", page.Words);
 
-        sb.AppendLine($"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\an5}}{dialogueText}");
+            sb.AppendLine(
+                $"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\an5}}{dialogueText}");
+        }
 
         return sb.ToString();
     }
 
-    private static List<string> BuildKaraokeLines(
-        IReadOnlyList<WordTiming> wordTimings,
-        int maxWordsPerLine)
+    private sealed class SubtitlePage
     {
-        var result = new List<string>();
-        var currentLine = new StringBuilder();
-        var wordsInLine = 0;
+        public double StartSeconds { get; set; }
+        public double EndSeconds { get; set; }
+        public List<string> Words { get; set; } = new();
+    }
 
-        foreach (var timing in wordTimings)
+    private static List<SubtitlePage> BuildTimedPages(
+        IReadOnlyList<WordTiming> wordTimings,
+        int maxWordsPerPage)
+    {
+        var pages = new List<SubtitlePage>();
+
+        for (int i = 0; i < wordTimings.Count; i += maxWordsPerPage)
         {
-            var word = EscapeAssText(timing.Word);
+            var chunk = wordTimings
+                .Skip(i)
+                .Take(maxWordsPerPage)
+                .ToList();
 
-            if (string.IsNullOrWhiteSpace(word))
+            if (chunk.Count == 0)
                 continue;
 
-            var durationCentiseconds = Math.Max(
-                1,
-                (int)Math.Round((timing.EndSeconds - timing.StartSeconds) * 100));
+            var words = new List<string>();
 
-            if (wordsInLine >= maxWordsPerLine)
+            foreach (var timing in chunk)
             {
-                result.Add(currentLine.ToString().Trim());
-                currentLine.Clear();
-                wordsInLine = 0;
+                var word = EscapeAssText(timing.Word);
+
+                if (string.IsNullOrWhiteSpace(word))
+                    continue;
+
+                var durationCentiseconds = Math.Max(
+                    1,
+                    (int)Math.Round(
+                        (timing.EndSeconds - timing.StartSeconds) * 100));
+
+                words.Add($@"{{\k{durationCentiseconds}}}{word}");
             }
 
-            currentLine.Append($@"{{\k{durationCentiseconds}}}{word} ");
-            wordsInLine++;
+            if (words.Count == 0)
+                continue;
+
+            pages.Add(new SubtitlePage
+            {
+                StartSeconds = chunk.First().StartSeconds,
+                EndSeconds = chunk.Last().EndSeconds,
+                Words = words
+            });
         }
 
-        if (currentLine.Length > 0)
-            result.Add(currentLine.ToString().Trim());
-
-        return result;
+        return pages;
     }
 
     private static string ToAssTime(double seconds)
     {
         var time = TimeSpan.FromSeconds(seconds);
+
         return $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}.{time.Milliseconds / 10:00}";
     }
 
