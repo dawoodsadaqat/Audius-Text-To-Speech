@@ -1,18 +1,23 @@
-using SkiaSharp;
+using System.Text;
 using TextToVideo.Api.Models;
 
 namespace TextToVideo.Api.Services;
 
 public interface IVideoRenderService
 {
-    Task<string> RenderFramesAsync(string text, IReadOnlyList<WordTiming> wordTimings, double durationSeconds, string jobDirectory, CancellationToken cancellationToken);
+    Task<string> RenderFramesAsync(
+        string text,
+        IReadOnlyList<WordTiming> wordTimings,
+        double durationSeconds,
+        string jobDirectory,
+        CancellationToken cancellationToken);
 }
 
 public sealed class VideoRenderService : IVideoRenderService
 {
-    public const int Width = 1080;
-    public const int Height = 1920;
-    public const int FramesPerSecond = 30;
+    public const int Width = 720;
+    public const int Height = 1280;
+    public const int FramesPerSecond = 15;
 
     private readonly ILogger<VideoRenderService> _logger;
 
@@ -21,142 +26,109 @@ public sealed class VideoRenderService : IVideoRenderService
         _logger = logger;
     }
 
-    public Task<string> RenderFramesAsync(string text, IReadOnlyList<WordTiming> wordTimings, double durationSeconds, string jobDirectory, CancellationToken cancellationToken)
+    public async Task<string> RenderFramesAsync(
+        string text,
+        IReadOnlyList<WordTiming> wordTimings,
+        double durationSeconds,
+        string jobDirectory,
+        CancellationToken cancellationToken)
     {
-        var framesDirectory = Path.Combine(jobDirectory, "frames");
-        Directory.CreateDirectory(framesDirectory);
+        var assPath = Path.Combine(jobDirectory, "highlight.ass");
 
-        var layoutWords = BuildLayoutWords(wordTimings);
-        var totalFrames = Math.Max(1, (int)Math.Ceiling(durationSeconds * FramesPerSecond));
-        _logger.LogInformation("Rendering {FrameCount} PNG frames at {Fps} FPS.", totalFrames, FramesPerSecond);
+        _logger.LogInformation("Creating optimized ASS subtitle file.");
 
-        for (var frame = 0; frame < totalFrames; frame++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var seconds = frame / (double)FramesPerSecond;
-            var activeIndex = FindActiveWordIndex(wordTimings, seconds);
-            RenderSingleFrame(layoutWords, activeIndex, Path.Combine(framesDirectory, $"frame_{frame:D6}.png"));
-        }
+        var ass = BuildAssSubtitle(wordTimings, durationSeconds);
 
-        return Task.FromResult(framesDirectory);
+        await File.WriteAllTextAsync(assPath, ass, Encoding.UTF8, cancellationToken);
+
+        return assPath;
     }
 
-    private static IReadOnlyList<LayoutWord> BuildLayoutWords(IReadOnlyList<WordTiming> wordTimings)
+    private static string BuildAssSubtitle(
+        IReadOnlyList<WordTiming> wordTimings,
+        double durationSeconds)
     {
-        // The rendered script is based on Azure words so the highlight can sync exactly to timestamps.
-        return wordTimings.Select((timing, index) => new LayoutWord(timing.Word, index)).ToList();
+        var sb = new StringBuilder();
+
+        sb.AppendLine("[Script Info]");
+        sb.AppendLine("ScriptType: v4.00+");
+        sb.AppendLine("PlayResX: 720");
+        sb.AppendLine("PlayResY: 1280");
+        sb.AppendLine("ScaledBorderAndShadow: yes");
+        sb.AppendLine();
+
+        sb.AppendLine("[V4+ Styles]");
+        sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
+
+        // ASS color format: &HAABBGGRR
+        // PrimaryColour: highlighted orange
+        // SecondaryColour: normal black
+        sb.AppendLine("Style: Default,Arial,54,&H0000A5FF,&H00000000,&H00FFFFFF,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,5,60,60,60,1");
+        sb.AppendLine();
+
+        sb.AppendLine("[Events]");
+        sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+
+        var start = "0:00:00.00";
+        var end = ToAssTime(durationSeconds + 1.0);
+
+        var lines = BuildKaraokeLines(wordTimings, maxWordsPerLine: 7);
+        var dialogueText = string.Join(@"\N", lines);
+
+        sb.AppendLine($"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\an5}}{dialogueText}");
+
+        return sb.ToString();
     }
 
-    private static int FindActiveWordIndex(IReadOnlyList<WordTiming> wordTimings, double seconds)
+    private static List<string> BuildKaraokeLines(
+        IReadOnlyList<WordTiming> wordTimings,
+        int maxWordsPerLine)
     {
-        for (var i = 0; i < wordTimings.Count; i++)
+        var result = new List<string>();
+        var currentLine = new StringBuilder();
+        var wordsInLine = 0;
+
+        foreach (var timing in wordTimings)
         {
-            if (seconds >= wordTimings[i].StartSeconds && seconds <= wordTimings[i].EndSeconds)
+            var word = EscapeAssText(timing.Word);
+
+            if (string.IsNullOrWhiteSpace(word))
+                continue;
+
+            var durationCentiseconds = Math.Max(
+                1,
+                (int)Math.Round((timing.EndSeconds - timing.StartSeconds) * 100));
+
+            if (wordsInLine >= maxWordsPerLine)
             {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    private static void RenderSingleFrame(IReadOnlyList<LayoutWord> words, int activeIndex, string outputPath)
-    {
-        using var bitmap = new SKBitmap(Width, Height);
-        using var canvas = new SKCanvas(bitmap);
-        canvas.Clear(SKColors.White);
-
-        using var textPaint = new SKPaint
-        {
-            Color = SKColors.Black,
-            IsAntialias = true,
-            Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold),
-            TextSize = 72
-        };
-
-        using var highlightPaint = new SKPaint
-        {
-            Color = new SKColor(255, 166, 0),
-            IsAntialias = true
-        };
-
-        var lines = WrapWords(words, textPaint, Width - 160);
-        var lineHeight = 98f;
-        var startY = (Height - lines.Count * lineHeight) / 2f + 80f;
-
-        for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
-        {
-            var line = lines[lineIndex];
-            var lineWidth = MeasureLine(line, textPaint);
-            var x = (Width - lineWidth) / 2f;
-            var baseline = startY + lineIndex * lineHeight;
-
-            foreach (var word in line)
-            {
-                var wordWidth = textPaint.MeasureText(word.Text);
-                if (word.Index == activeIndex)
-                {
-                    var rect = SKRect.Create(x - 14, baseline - 74, wordWidth + 28, 88);
-                    canvas.DrawRoundRect(rect, 22, 22, highlightPaint);
-                }
-
-                canvas.DrawText(word.Text, x, baseline, textPaint);
-                x += wordWidth + textPaint.MeasureText(" ");
-            }
-        }
-
-        using var image = SKImage.FromBitmap(bitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Png, 95);
-        using var fileStream = File.OpenWrite(outputPath);
-        data.SaveTo(fileStream);
-    }
-
-    private static List<List<LayoutWord>> WrapWords(IReadOnlyList<LayoutWord> words, SKPaint paint, float maxWidth)
-    {
-        var lines = new List<List<LayoutWord>>();
-        var currentLine = new List<LayoutWord>();
-        var currentWidth = 0f;
-        var spaceWidth = paint.MeasureText(" ");
-
-        foreach (var word in words)
-        {
-            var wordWidth = paint.MeasureText(word.Text);
-            var proposedWidth = currentLine.Count == 0 ? wordWidth : currentWidth + spaceWidth + wordWidth;
-
-            if (currentLine.Count > 0 && proposedWidth > maxWidth)
-            {
-                lines.Add(currentLine);
-                currentLine = new List<LayoutWord>();
-                currentWidth = 0;
+                result.Add(currentLine.ToString().Trim());
+                currentLine.Clear();
+                wordsInLine = 0;
             }
 
-            currentLine.Add(word);
-            currentWidth = currentLine.Count == 1 ? wordWidth : currentWidth + spaceWidth + wordWidth;
+            currentLine.Append($@"{{\k{durationCentiseconds}}}{word} ");
+            wordsInLine++;
         }
 
-        if (currentLine.Count > 0)
-        {
-            lines.Add(currentLine);
-        }
+        if (currentLine.Length > 0)
+            result.Add(currentLine.ToString().Trim());
 
-        return lines;
+        return result;
     }
 
-    private static float MeasureLine(IReadOnlyList<LayoutWord> line, SKPaint paint)
+    private static string ToAssTime(double seconds)
     {
-        var width = 0f;
-        var spaceWidth = paint.MeasureText(" ");
-        for (var i = 0; i < line.Count; i++)
-        {
-            width += paint.MeasureText(line[i].Text);
-            if (i + 1 < line.Count)
-            {
-                width += spaceWidth;
-            }
-        }
-
-        return width;
+        var time = TimeSpan.FromSeconds(seconds);
+        return $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}.{time.Milliseconds / 10:00}";
     }
 
-    private sealed record LayoutWord(string Text, int Index);
+    private static string EscapeAssText(string value)
+    {
+        return value
+            .Replace(@"\", @"\\")
+            .Replace("{", "")
+            .Replace("}", "")
+            .Replace("\n", " ")
+            .Trim();
+    }
 }

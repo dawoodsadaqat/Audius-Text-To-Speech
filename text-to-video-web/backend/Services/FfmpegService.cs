@@ -7,7 +7,7 @@ namespace TextToVideo.Api.Services;
 public interface IFfmpegService
 {
     Task<string> CreateVideoAsync(
-        string framesDirectory,
+        string subtitlePath,
         string audioPath,
         string jobDirectory,
         CancellationToken cancellationToken);
@@ -27,44 +27,51 @@ public sealed class FfmpegService : IFfmpegService
     }
 
     public async Task<string> CreateVideoAsync(
-        string framesDirectory,
+        string subtitlePath,
         string audioPath,
         string jobDirectory,
         CancellationToken cancellationToken)
     {
         var outputPath = Path.Combine(jobDirectory, "final.mp4");
-        var framePattern = Path.Combine(framesDirectory, "frame_%06d.png");
 
-        if (!Directory.Exists(framesDirectory))
-            throw new DirectoryNotFoundException($"Frames directory not found: {framesDirectory}");
+        if (!File.Exists(subtitlePath))
+            throw new FileNotFoundException($"Subtitle file not found: {subtitlePath}");
 
         if (!File.Exists(audioPath))
             throw new FileNotFoundException($"Audio file not found: {audioPath}");
+
+        var safeSubtitlePath = subtitlePath
+            .Replace("\\", "/")
+            .Replace(":", "\\:")
+            .Replace("'", "\\'");
+
+        var blankVideoInput =
+            $"color=c=white:s={VideoRenderService.Width}x{VideoRenderService.Height}:r={VideoRenderService.FramesPerSecond}:d=9999";
+
+        var subtitleFilter =
+            $"subtitles='{safeSubtitlePath}'";
 
         var arguments = string.Join(' ', new[]
         {
             "-y",
 
-            // Input video frames
-            $"-framerate {VideoRenderService.FramesPerSecond}",
-            $"-i {Quote(framePattern)}",
+            "-f lavfi",
+            $"-i {Quote(blankVideoInput)}",
 
-            // Input audio
             $"-i {Quote(audioPath)}",
 
-            // Video encoding
+            $"-vf {Quote(subtitleFilter)}",
+
             "-c:v libx264",
+            "-preset ultrafast",
+            "-crf 30",
             "-pix_fmt yuv420p",
 
-            // Audio encoding
             "-c:a aac",
-            "-b:a 192k",
+            "-b:a 128k",
 
-            // IMPORTANT:
-            // Do NOT use -shortest here.
-            // -shortest can cut the last word/audio tail.
-            // We allow FFmpeg to keep the full audio duration.
-            "-af apad=pad_dur=0.8",
+            "-shortest",
+            "-movflags +faststart",
 
             Quote(outputPath)
         });
@@ -81,10 +88,10 @@ public sealed class FfmpegService : IFfmpegService
             CreateNoWindow = true
         };
 
-        _logger.LogInformation("Running FFmpeg: {Command} {Arguments}", startInfo.FileName, arguments);
+        _logger.LogInformation("Running optimized FFmpeg without PNG frame rendering.");
 
         using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Could not start FFmpeg. Check Ffmpeg:Path in appsettings.json.");
+            ?? throw new InvalidOperationException("Could not start FFmpeg.");
 
         var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -102,7 +109,7 @@ public sealed class FfmpegService : IFfmpegService
                 standardOutput,
                 standardError);
 
-            throw new InvalidOperationException($"FFmpeg failed to create the video. {standardError}");
+            throw new InvalidOperationException($"FFmpeg failed to create video. {standardError}");
         }
 
         if (!File.Exists(outputPath))
