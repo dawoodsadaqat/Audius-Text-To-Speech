@@ -41,15 +41,17 @@ public sealed class FfmpegService : IFfmpegService
             throw new FileNotFoundException($"Audio file not found: {audioPath}");
 
         var safeSubtitlePath = subtitlePath
-            .Replace("\\", "/")
-            .Replace(":", "\\:")
-            .Replace("'", "\\'");
+    .Replace("\\", "/")
+    .Replace(":", "\\:")
+    .Replace("'", "\\'");
+
+var subtitleFilter =
+    $"subtitles=filename='{safeSubtitlePath}'";
 
         var blankVideoInput =
             $"color=c=white:s={VideoRenderService.Width}x{VideoRenderService.Height}:r={VideoRenderService.FramesPerSecond}:d=9999";
 
-        var subtitleFilter =
-            $"subtitles='{safeSubtitlePath}'";
+        
 
         var arguments = string.Join(' ', new[]
         {
