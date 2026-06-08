@@ -1,0 +1,32 @@
+[
+  {
+    "word": "Success",
+    "startSeconds": 0.28,
+    "endSeconds": 0.54
+  },
+  {
+    "word": "comes",
+    "startSeconds": 0.54,
+    "endSeconds": 0.86
+  },
+  {
+    "word": "from",
+    "startSeconds": 0.86,
+    "endSeconds": 1.08
+  },
+  {
+    "word": "discipline",
+    "startSeconds": 1.08,
+    "endSeconds": 1.52
+  },
+  {
+    "word": "and",
+    "startSeconds": 1.52,
+    "endSeconds": 1.74
+  },
+  {
+    "word": "action.",
+    "startSeconds": 1.74,
+    "endSeconds": 2.08
+  }
+]

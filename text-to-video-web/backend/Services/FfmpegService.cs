@@ -73,7 +73,6 @@ var subtitleFilter =
             "-b:a 128k",
 
             "-shortest",
-            "-movflags +faststart",
 
             Quote(outputPath)
         });

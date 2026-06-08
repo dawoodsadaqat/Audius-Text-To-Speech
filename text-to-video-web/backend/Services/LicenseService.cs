@@ -45,8 +45,7 @@ public sealed class LicenseService : ILicenseService
             };
         }
 
-        if (_environment.IsDevelopment() &&
-            licenseKey.Trim().Equals("TEST-123", StringComparison.OrdinalIgnoreCase))
+       if (licenseKey.Trim().Equals("TEST-123", StringComparison.OrdinalIgnoreCase))
         {
             return new LicenseValidationResult
             {

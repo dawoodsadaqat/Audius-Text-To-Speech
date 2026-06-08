@@ -7,22 +7,22 @@ namespace TextToVideo.Api.Services;
 public class SpeechService : ISpeechService
 {
     private readonly IConfiguration _configuration;
-    private readonly IWebHostEnvironment _environment;
+    private readonly ILogger<SpeechService> _logger;
 
     public SpeechService(
         IConfiguration configuration,
-        IWebHostEnvironment environment)
+        ILogger<SpeechService> logger)
     {
         _configuration = configuration;
-        _environment = environment;
+        _logger = logger;
     }
 
-   public async Task<SpeechResult> GenerateSpeechAsync(
-    string text,
-    string audioOutputPath,
-    string subtitleOutputPath,
-    string voiceName,
-    CancellationToken cancellationToken = default)
+    public async Task<SpeechResult> GenerateSpeechAsync(
+        string text,
+        string audioOutputPath,
+        string subtitleOutputPath,
+        string voiceName,
+        CancellationToken cancellationToken = default)
     {
         var jobDirectory = Path.GetDirectoryName(audioOutputPath)
             ?? throw new Exception("Invalid audio output path.");
@@ -40,13 +40,35 @@ public class SpeechService : ISpeechService
         if (File.Exists(wordTimingJsonPath))
             File.Delete(wordTimingJsonPath);
 
-        var pythonCommand = _configuration["EdgeTts:PythonCommand"] ?? "python3";
-       
+        var pythonCommand =
+            _configuration["EdgeTts:PythonCommand"];
 
-        var scriptPath = Path.Combine(
-            _environment.ContentRootPath,
-            "scripts",
-            "edge_tts_generate.py");
+        if (string.IsNullOrWhiteSpace(pythonCommand))
+        {
+            pythonCommand = OperatingSystem.IsWindows()
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".audius",
+                    "runtime",
+                    "venv",
+                    "Scripts",
+                    "python.exe")
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".audius",
+                    "runtime",
+                    "venv",
+                    "bin",
+                    "python3");
+        }
+
+        var scriptPath = ResolveEdgeTtsScriptPath();
+
+        _logger.LogInformation("Python path: {PythonPath}", pythonCommand);
+        _logger.LogInformation("Edge-TTS script path: {ScriptPath}", scriptPath);
+
+        if (!File.Exists(pythonCommand))
+            throw new Exception($"Python runtime not found: {pythonCommand}");
 
         if (!File.Exists(scriptPath))
             throw new Exception($"Edge-TTS script not found: {scriptPath}");
@@ -58,7 +80,7 @@ public class SpeechService : ISpeechService
             $"\"{wordTimingJsonPath}\" " +
             $"\"{voiceName}\"";
 
-        var process = new Process
+        using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
@@ -79,7 +101,10 @@ public class SpeechService : ISpeechService
         await process.WaitForExitAsync(cancellationToken);
 
         if (process.ExitCode != 0)
-            throw new Exception($"Edge-TTS Python script failed: {error}");
+        {
+            throw new Exception(
+                $"Edge-TTS Python script failed. Output: {output}. Error: {error}");
+        }
 
         if (!File.Exists(audioOutputPath))
             throw new Exception("Audio file was not created.");
@@ -105,5 +130,23 @@ public class SpeechService : ISpeechService
             WordTimings = wordTimings,
             DurationSeconds = wordTimings.Max(x => x.EndSeconds) + 1.0
         };
+    }
+
+    private static string ResolveEdgeTtsScriptPath()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "scripts", "edge_tts_generate.py"),
+            Path.Combine(Directory.GetCurrentDirectory(), "scripts", "edge_tts_generate.py"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "scripts", "edge_tts_generate.py")
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return candidates[0];
     }
 }

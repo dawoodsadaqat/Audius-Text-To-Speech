@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using TextToVideo.Api.Options;
 using TextToVideo.Api.Services;
@@ -13,25 +14,27 @@ builder.Services.Configure<FfmpegOptions>(
 builder.Services.Configure<LicenseOptions>(
     builder.Configuration.GetSection("License"));
 
+builder.Services.Configure<RuntimeOptions>(
+    builder.Configuration.GetSection("Runtime"));
+
 builder.Services.AddControllers();
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("FrontendLocalhost", policy =>
+    options.AddPolicy("AudiusDesktop", policy =>
     {
         policy
             .WithOrigins(
+                "tauri://localhost",
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",
-                "http://localhost:3001",
-                "http://127.0.0.1:3001",
-                "http://185.182.187.248:3001"
+                "http://localhost:5055",
+                "http://127.0.0.1:5055"
             )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
 });
-
 builder.Services.AddScoped<ITextFileService, TextFileService>();
 builder.Services.AddScoped<ISpeechService, SpeechService>();
 builder.Services.AddScoped<IVideoRenderService, VideoRenderService>();
@@ -49,13 +52,18 @@ var outputsDirectory = Path.Combine(
 
 Directory.CreateDirectory(outputsDirectory);
 
-app.UseCors("FrontendLocalhost");
+var provider = new FileExtensionContentTypeProvider();
+provider.Mappings[".mp4"] = "video/mp4";
 
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(outputsDirectory),
-    RequestPath = "/outputs"
+    RequestPath = "/outputs",
+    ContentTypeProvider = provider,
+    ServeUnknownFileTypes = true
 });
+
+app.UseCors("AudiusDesktop");
 
 app.MapControllers();
 

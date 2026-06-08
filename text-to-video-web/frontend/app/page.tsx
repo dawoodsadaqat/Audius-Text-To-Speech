@@ -1,9 +1,12 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { readTextFile } from "@tauri-apps/plugin-fs";
+const API_BASE_URL = "http://localhost:5055";
 
 const voices = [
   { value: "en-US-JennyNeural", label: "Jenny - US English" },
@@ -40,18 +43,52 @@ export default function Home() {
   const [licenseMessage, setLicenseMessage] = useState("");
   const [isCheckingLicense, setIsCheckingLicense] = useState(false);
 
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [runtimeMessage, setRuntimeMessage] = useState("Checking Audius runtime...");
+
   const statusMessage = useMemo(
     () => simulatedSteps[statusIndex] ?? simulatedSteps[0],
     [statusIndex]
   );
+async function checkRuntime() {
+  try {
+    console.log("Calling:", `${API_BASE_URL}/api/system/check`);
 
+    const response = await fetch(
+      `${API_BASE_URL}/api/system/check`
+    );
+
+    console.log("Status:", response.status);
+
+    const data = await response.json();
+
+    console.log("Data:", data);
+
+    setRuntimeReady(data.runtimeReady);
+    setRuntimeMessage(
+      data.runtimeReady
+        ? "Audius runtime is ready."
+        : "Audius runtime is missing."
+    );
+  } catch (error) {
+    console.error("FULL ERROR:", error);
+
+    setRuntimeReady(false);
+    setRuntimeMessage(
+      error instanceof Error
+        ? error.message
+        : JSON.stringify(error)
+    );
+  }
+}
   useEffect(() => {
     const savedLicense = localStorage.getItem("audius_license_key");
-
-    if (savedLicense) {
-      setLicenseKey(savedLicense);
-    }
+    if (savedLicense) setLicenseKey(savedLicense);
   }, []);
+
+  useEffect(() => {
+  checkRuntime();
+}, []);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -64,14 +101,139 @@ export default function Home() {
 
     return () => window.clearInterval(interval);
   }, [isGenerating]);
+useEffect(() => {
+  let unlisten: (() => void) | undefined;
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const selectedFile = event.target.files?.[0] ?? null;
+  async function setupTauriDrop() {
+    unlisten = await getCurrentWindow().onDragDropEvent(async (event) => {
+      const payload: any = event.payload;
+
+      if (payload.type !== "drop") {
+        return;
+      }
+
+      const droppedPath = payload.paths?.[0];
+
+      if (!droppedPath) {
+        setError("No file was dropped.");
+        return;
+      }
+
+      if (!droppedPath.toLowerCase().endsWith(".txt")) {
+        setError("Only .txt files are supported.");
+        return;
+      }
+
+      try {
+        const text = await readTextFile(droppedPath);
+
+        const fileName = droppedPath.split("/").pop() ?? "notes.txt";
+
+        const droppedFile = new File([text], fileName, {
+          type: "text/plain",
+        });
+
+        setFile(droppedFile);
+        setError(null);
+        setVideoUrl(null);
+      } catch (error) {
+        console.error("Tauri drop failed:", error);
+        setError("Could not read dropped file.");
+      }
+    });
+  }
+
+  setupTauriDrop();
+
+  return () => {
+    if (unlisten) {
+      unlisten();
+    }
+  };
+}, []);
+  function setSelectedFile(selectedFile: File | null) {
     setFile(selectedFile);
     setError(null);
     setVideoUrl(null);
   }
 
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFile = event.target.files?.[0] ?? null;
+    setSelectedFile(selectedFile);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+
+    const droppedFile = event.dataTransfer.files?.[0] ?? null;
+
+    if (!droppedFile) return;
+
+    if (!droppedFile.name.toLowerCase().endsWith(".txt")) {
+      setError("Only .txt files are supported right now.");
+      return;
+    }
+
+    setSelectedFile(droppedFile);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+  }
+
+  async function downloadGeneratedVideo() {
+    if (!videoUrl) return;
+
+    try {
+      const response = await fetch(videoUrl);
+
+      if (!response.ok) {
+        throw new Error("Could not download generated video.");
+      }
+
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = objectUrl;
+      link.download = `audius-video-${Date.now()}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(videoUrl, "_blank");
+    }
+  }
+async function downloadVideoFromTauri() {
+  if (!videoUrl) {
+    alert("No generated video is available.");
+    return;
+  }
+
+  try {
+    const savePath = await save({
+      defaultPath: `audius-video-${Date.now()}.mp4`,
+      filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+    });
+
+    if (!savePath) return;
+
+    await invoke("save_video_from_url", {
+      videoUrl,
+      savePath,
+    });
+
+    alert(`Video saved successfully:\n${savePath}`);
+  } catch (error) {
+    alert(
+      error instanceof Error
+        ? `Save failed: ${error.message}`
+        : `Save failed: ${String(error)}`
+    );
+  }
+}
   async function validateLicense() {
     if (!licenseKey.trim()) {
       setLicenseMessage("Please enter your Audius license key.");
@@ -85,12 +247,8 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/license/validate`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          licenseKey: licenseKey.trim(),
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ licenseKey: licenseKey.trim() }),
       });
 
       const data = await response.json();
@@ -114,6 +272,11 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!runtimeReady) {
+      setError("Audius runtime is missing. Please install runtime dependencies first.");
+      return;
+    }
 
     if (!licenseActive) {
       setError("Please activate your Audius license before generating videos.");
@@ -254,10 +417,7 @@ export default function Home() {
                       Constitutional Law
                     </p>
                     <p className="mt-6 text-4xl font-black leading-tight">
-                      The{" "}
-                      <span className="rounded-xl bg-amber-300 px-2">
-                        burden
-                      </span>{" "}
+                      The <span className="rounded-xl bg-amber-300 px-2">burden</span>{" "}
                       of proof remains on the prosecution.
                     </p>
                     <p className="mt-8 text-sm text-slate-500">
@@ -276,26 +436,10 @@ export default function Home() {
         className="mx-auto grid max-w-7xl gap-5 px-6 py-16 md:grid-cols-4"
       >
         {[
-          [
-            "01",
-            "Upload notes",
-            "Add plain text from law lectures, case briefs, or exam summaries.",
-          ],
-          [
-            "02",
-            "Choose voice",
-            "Select a clear narration voice for your legal study material.",
-          ],
-          [
-            "03",
-            "Sync highlights",
-            "Audius aligns words with narration for focused revision.",
-          ],
-          [
-            "04",
-            "Export MP4",
-            "Download a vertical video ready for mobile viewing or sharing.",
-          ],
+          ["01", "Upload notes", "Add plain text from law lectures, case briefs, or exam summaries."],
+          ["02", "Choose voice", "Select a clear narration voice for your legal study material."],
+          ["03", "Sync highlights", "Audius aligns words with narration for focused revision."],
+          ["04", "Export MP4", "Download a vertical video ready for mobile viewing or sharing."],
         ].map(([number, title, description]) => (
           <div
             key={number}
@@ -332,6 +476,37 @@ export default function Home() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-lg font-black text-slate-950">
+                  Audius Runtime
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Local FFmpeg and Python runtime must be installed on this machine.
+                </p>
+              </div>
+
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-black ${
+                  runtimeReady
+                    ? "bg-green-100 text-green-700"
+                    : "bg-red-100 text-red-700"
+                }`}
+              >
+                {runtimeReady ? "Ready" : "Missing"}
+              </span>
+            </div>
+
+            <p
+              className={`mt-3 text-sm font-semibold ${
+                runtimeReady ? "text-green-700" : "text-red-700"
+              }`}
+            >
+              {runtimeMessage}
+            </p>
+          </div>
+
+          <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-950">
                   Audius License
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
@@ -362,7 +537,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={validateLicense}
-                disabled={isCheckingLicense}
+                disabled={isCheckingLicense || !runtimeReady}
                 className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:bg-slate-400"
               >
                 {isCheckingLicense ? "Checking..." : "Activate"}
@@ -381,15 +556,30 @@ export default function Home() {
           </div>
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-            <label className="block">
-              <span className="text-sm font-bold text-slate-700">
-                Legal notes file (.txt)
+            <label
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              className="block cursor-pointer rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center transition hover:border-amber-400 hover:bg-amber-50"
+            >
+              <span className="block text-sm font-black text-slate-700">
+                Drag & drop your legal notes here
               </span>
+
+              <span className="mt-2 block text-sm text-slate-500">
+                or click to browse a .txt file
+              </span>
+
+              {file && (
+                <span className="mt-4 block rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 ring-1 ring-slate-200">
+                  Selected: {file.name}
+                </span>
+              )}
+
               <input
                 type="file"
                 accept=".txt,text/plain"
                 onChange={handleFileChange}
-                className="mt-2 block w-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm file:mr-4 file:rounded-full file:border-0 file:bg-slate-950 file:px-5 file:py-2 file:text-sm file:font-bold file:text-white hover:border-amber-400"
+                className="hidden"
               />
             </label>
 
@@ -412,7 +602,7 @@ export default function Home() {
 
             <button
               type="submit"
-              disabled={!file || isGenerating || !licenseActive}
+              disabled={!file || isGenerating || !licenseActive || !runtimeReady}
               className="w-full rounded-2xl bg-amber-400 px-6 py-4 text-base font-black text-slate-950 shadow-lg shadow-amber-200 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
             >
               {isGenerating ? "Generating legal video..." : "Generate video"}
@@ -432,8 +622,7 @@ export default function Home() {
               <div className="mb-4 flex items-center justify-between text-sm">
                 <span>{statusMessage}</span>
                 <span>
-                  {Math.round(((statusIndex + 1) / simulatedSteps.length) * 100)}
-                  %
+                  {Math.round(((statusIndex + 1) / simulatedSteps.length) * 100)}%
                 </span>
               </div>
               <div className="h-3 overflow-hidden rounded-full bg-white/10">
@@ -459,25 +648,33 @@ export default function Home() {
 
           {videoUrl && (
             <div className="mt-8 space-y-4">
-              <a
-                href={videoUrl}
-                download
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block rounded-2xl bg-white px-5 py-4 text-center text-sm font-black text-slate-950 transition hover:bg-amber-100"
+          <button
+  type="button"
+  onClick={downloadVideoFromTauri}
+  className="block w-full rounded-2xl bg-white px-5 py-4 text-center text-sm font-black text-slate-950 transition hover:bg-amber-100"
+>
+  Save generated video
+</button>
+
+              <button
+                type="button"
+                onClick={() => window.open(videoUrl, "_blank")}
+                className="block w-full rounded-2xl border border-white/10 px-5 py-4 text-center text-sm font-black text-white transition hover:bg-white/10"
               >
-                Download generated video
-              </a>
+                Open video in browser
+              </button>
+
               <p className="text-xs leading-5 text-slate-400">
-                Preview is disabled for faster and more reliable demo delivery.
+                Download is handled directly by Audius. If your browser blocks it,
+                use Open video in browser and save the file manually.
               </p>
             </div>
           )}
 
           {!isGenerating && !error && !videoUrl && (
             <div className="mt-8 rounded-2xl border border-white/10 p-5 text-sm leading-6 text-slate-300">
-              Activate your license, upload a .txt legal note file, and create
-              your first Audius video.
+              Check runtime, activate license, upload a .txt legal note file,
+              and create your first Audius video.
             </div>
           )}
         </aside>
