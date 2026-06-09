@@ -9,7 +9,6 @@ namespace TextToVideo.Api.Services;
 public interface ILicenseService
 {
     Task<LicenseValidationResult> ValidateAsync(
-        string licenseKey,
         CancellationToken cancellationToken);
 }
 
@@ -18,34 +17,32 @@ public sealed class LicenseService : ILicenseService
     private readonly HttpClient _httpClient;
     private readonly LicenseOptions _options;
     private readonly IMachineIdService _machineIdService;
-    private readonly IWebHostEnvironment _environment;
 
     public LicenseService(
         HttpClient httpClient,
         IOptions<LicenseOptions> options,
-        IMachineIdService machineIdService,
-        IWebHostEnvironment environment)
+        IMachineIdService machineIdService)
     {
         _httpClient = httpClient;
         _options = options.Value;
         _machineIdService = machineIdService;
-        _environment = environment;
     }
 
     public async Task<LicenseValidationResult> ValidateAsync(
-        string licenseKey,
         CancellationToken cancellationToken)
     {
+        var licenseKey = _options.LicenseKey?.Trim();
+
         if (string.IsNullOrWhiteSpace(licenseKey))
         {
             return new LicenseValidationResult
             {
                 Active = false,
-                Message = "License key is required."
+                Message = "License key is missing in backend configuration."
             };
         }
 
-       if (licenseKey.Trim().Equals("TEST-123", StringComparison.OrdinalIgnoreCase))
+        if (licenseKey.Equals("TEST-123", StringComparison.OrdinalIgnoreCase))
         {
             return new LicenseValidationResult
             {
@@ -69,7 +66,7 @@ public sealed class LicenseService : ILicenseService
         {
             var payload = new
             {
-                licenseKey = licenseKey.Trim(),
+                licenseKey,
                 machineId = _machineIdService.GetMachineId(),
                 appVersion = "1.0.0"
             };
@@ -98,7 +95,7 @@ public sealed class LicenseService : ILicenseService
                 return new LicenseValidationResult
                 {
                     Active = false,
-                    Message = "License server rejected the request."
+                    Message = $"License server rejected the request. Status: {(int)response.StatusCode}"
                 };
             }
 

@@ -4,7 +4,17 @@ import re
 import sys
 import edge_tts
 import stable_whisper
+import os
 
+os.environ["PATH"] = (
+    "/opt/homebrew/bin:"
+    "/usr/local/bin:"
+    "/usr/bin:"
+    "/bin:"
+    "/usr/sbin:"
+    "/sbin:"
+    + os.environ.get("PATH", "")
+)
 
 def clean_word(word):
     return word.strip().replace("\n", " ")

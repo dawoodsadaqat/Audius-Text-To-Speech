@@ -9,19 +9,15 @@ public sealed class LicenseController : ControllerBase
 {
     private readonly ILicenseService _licenseService;
 
-    public LicenseController(ILicenseService licenseService)
+     public LicenseController(ILicenseService licenseService)
     {
         _licenseService = licenseService;
     }
 
-    [HttpPost("validate")]
-    public async Task<IActionResult> Validate(
-        [FromBody] LicenseRequest request,
-        CancellationToken cancellationToken)
+    [HttpGet("validate")]
+    public async Task<IActionResult> Validate(CancellationToken cancellationToken)
     {
-        var result = await _licenseService.ValidateAsync(
-            request.LicenseKey,
-            cancellationToken);
+        var result = await _licenseService.ValidateAsync(cancellationToken);
 
         return Ok(result);
     }

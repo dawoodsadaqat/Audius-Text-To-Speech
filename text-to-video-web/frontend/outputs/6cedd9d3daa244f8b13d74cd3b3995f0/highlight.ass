@@ -1,0 +1,14 @@
+﻿[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,56,&H0000A5FF,&H00000000,&H00FFFFFF,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,5,70,70,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.18,0:00:02.27,Default,,0,0,0,,{\an5\pos(360,720)}{\k10}The {\k24}burden {\k12}of {\k26}proof {\k36}remains {\k26}on {\k12}the {\k64}prosecution
+Dialogue: 0,0:00:02.27,0:00:05.60,Default,,0,0,0,,{\an5\pos(360,720)}{\k40}throughout {\k22}the {\k20}criminal {\k40}trial.

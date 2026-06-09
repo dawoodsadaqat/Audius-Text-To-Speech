@@ -4,4 +4,6 @@ public sealed class LicenseOptions
 {
     public string ServerUrl { get; set; } = "";
     public int RecheckHours { get; set; } = 24;
+
+    public string LicenseKey { get; set; } = "";
 }

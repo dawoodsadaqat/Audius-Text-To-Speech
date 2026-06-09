@@ -1,0 +1,14 @@
+{
+  "Licenses": [
+    {
+      "LicenseKey": "CLIENT-KEY-001",
+      "Plan": "Pro",
+      "Active": true,
+      "MaxActivations": 1,
+      "ExpiresAt": "2026-12-31T23:59:59Z",
+      "MachineIds": [
+        "24167B7E4F8E808980973C5C57E483101DE0164B3763F8510FD83DECA8D41960"
+      ]
+    }
+  ]
+}

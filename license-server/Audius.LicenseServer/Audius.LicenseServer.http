@@ -1,0 +1,6 @@
+@Audius.LicenseServer_HostAddress = http://localhost:5265
+
+GET {{Audius.LicenseServer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

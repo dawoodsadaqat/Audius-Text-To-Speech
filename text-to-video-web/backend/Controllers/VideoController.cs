@@ -38,11 +38,7 @@ public sealed class VideoController : ControllerBase
             });
         }
 
-        var licenseKey = Request.Headers["X-Audius-License"].FirstOrDefault();
-
-        var license = await _licenseService.ValidateAsync(
-            licenseKey ?? "",
-            cancellationToken);
+      var license = await _licenseService.ValidateAsync(cancellationToken);
 
         if (!license.Active)
         {

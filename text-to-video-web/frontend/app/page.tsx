@@ -1,11 +1,11 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { save } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
 const API_BASE_URL = "http://localhost:5055";
 
 const voices = [
@@ -38,57 +38,72 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
-  const [licenseKey, setLicenseKey] = useState("");
-  const [licenseActive, setLicenseActive] = useState(false);
-  const [licenseMessage, setLicenseMessage] = useState("");
-  const [isCheckingLicense, setIsCheckingLicense] = useState(false);
-
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("Checking Audius runtime...");
+
+  const [licenseActive, setLicenseActive] = useState(false);
+  const [licenseMessage, setLicenseMessage] = useState("Checking Audius license...");
+  const [isCheckingLicense, setIsCheckingLicense] = useState(false);
 
   const statusMessage = useMemo(
     () => simulatedSteps[statusIndex] ?? simulatedSteps[0],
     [statusIndex]
   );
-async function checkRuntime() {
-  try {
-    console.log("Calling:", `${API_BASE_URL}/api/system/check`);
 
-    const response = await fetch(
-      `${API_BASE_URL}/api/system/check`
-    );
+  async function checkRuntime() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/system/check`);
+      const data = await response.json();
 
-    console.log("Status:", response.status);
-
-    const data = await response.json();
-
-    console.log("Data:", data);
-
-    setRuntimeReady(data.runtimeReady);
-    setRuntimeMessage(
-      data.runtimeReady
-        ? "Audius runtime is ready."
-        : "Audius runtime is missing."
-    );
-  } catch (error) {
-    console.error("FULL ERROR:", error);
-
-    setRuntimeReady(false);
-    setRuntimeMessage(
-      error instanceof Error
-        ? error.message
-        : JSON.stringify(error)
-    );
+      setRuntimeReady(Boolean(data.runtimeReady));
+      setRuntimeMessage(
+        data.runtimeReady
+          ? "Audius runtime is ready."
+          : data.message ?? "Audius runtime is missing."
+      );
+    } catch (requestError) {
+      setRuntimeReady(false);
+      setRuntimeMessage(
+        requestError instanceof Error
+          ? `Runtime check failed: ${requestError.message}`
+          : "Runtime check failed."
+      );
+    }
   }
-}
+
+  async function validateLicense() {
+    setIsCheckingLicense(true);
+    setLicenseMessage("Checking Audius license...");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/license/validate`);
+      const data = await response.json();
+
+      setLicenseActive(Boolean(data.active));
+      setLicenseMessage(
+        data.message ?? (data.active ? "License active." : "License inactive.")
+      );
+    } catch (requestError) {
+      setLicenseActive(false);
+      setLicenseMessage(
+        requestError instanceof Error
+          ? `License validation failed: ${requestError.message}`
+          : "License validation failed."
+      );
+    } finally {
+      setIsCheckingLicense(false);
+    }
+  }
+
   useEffect(() => {
-    const savedLicense = localStorage.getItem("audius_license_key");
-    if (savedLicense) setLicenseKey(savedLicense);
+    checkRuntime();
   }, []);
 
   useEffect(() => {
-  checkRuntime();
-}, []);
+    if (runtimeReady) {
+      validateLicense();
+    }
+  }, [runtimeReady]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -101,56 +116,50 @@ async function checkRuntime() {
 
     return () => window.clearInterval(interval);
   }, [isGenerating]);
-useEffect(() => {
-  let unlisten: (() => void) | undefined;
 
-  async function setupTauriDrop() {
-    unlisten = await getCurrentWindow().onDragDropEvent(async (event) => {
-      const payload: any = event.payload;
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
 
-      if (payload.type !== "drop") {
-        return;
-      }
+    async function setupTauriDrop() {
+      unlisten = await getCurrentWindow().onDragDropEvent(async (event) => {
+        const payload: any = event.payload;
 
-      const droppedPath = payload.paths?.[0];
+        if (payload.type !== "drop") return;
 
-      if (!droppedPath) {
-        setError("No file was dropped.");
-        return;
-      }
+        const droppedPath = payload.paths?.[0];
 
-      if (!droppedPath.toLowerCase().endsWith(".txt")) {
-        setError("Only .txt files are supported.");
-        return;
-      }
+        if (!droppedPath) {
+          setError("No file was dropped.");
+          return;
+        }
 
-      try {
-        const text = await readTextFile(droppedPath);
+        if (!droppedPath.toLowerCase().endsWith(".txt")) {
+          setError("Only .txt files are supported.");
+          return;
+        }
 
-        const fileName = droppedPath.split("/").pop() ?? "notes.txt";
+        try {
+          const text = await readTextFile(droppedPath);
+          const fileName = droppedPath.split("/").pop() ?? "notes.txt";
 
-        const droppedFile = new File([text], fileName, {
-          type: "text/plain",
-        });
+          const droppedFile = new File([text], fileName, {
+            type: "text/plain",
+          });
 
-        setFile(droppedFile);
-        setError(null);
-        setVideoUrl(null);
-      } catch (error) {
-        console.error("Tauri drop failed:", error);
-        setError("Could not read dropped file.");
-      }
-    });
-  }
-
-  setupTauriDrop();
-
-  return () => {
-    if (unlisten) {
-      unlisten();
+          setSelectedFile(droppedFile);
+        } catch {
+          setError("Could not read dropped file.");
+        }
+      });
     }
-  };
-}, []);
+
+    setupTauriDrop();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   function setSelectedFile(selectedFile: File | null) {
     setFile(selectedFile);
     setError(null);
@@ -181,92 +190,32 @@ useEffect(() => {
     event.preventDefault();
   }
 
-  async function downloadGeneratedVideo() {
-    if (!videoUrl) return;
-
-    try {
-      const response = await fetch(videoUrl);
-
-      if (!response.ok) {
-        throw new Error("Could not download generated video.");
-      }
-
-      const blob = await response.blob();
-      const objectUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      link.href = objectUrl;
-      link.download = `audius-video-${Date.now()}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      window.URL.revokeObjectURL(objectUrl);
-    } catch {
-      window.open(videoUrl, "_blank");
-    }
-  }
-async function downloadVideoFromTauri() {
-  if (!videoUrl) {
-    alert("No generated video is available.");
-    return;
-  }
-
-  try {
-    const savePath = await save({
-      defaultPath: `audius-video-${Date.now()}.mp4`,
-      filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
-    });
-
-    if (!savePath) return;
-
-    await invoke("save_video_from_url", {
-      videoUrl,
-      savePath,
-    });
-
-    alert(`Video saved successfully:\n${savePath}`);
-  } catch (error) {
-    alert(
-      error instanceof Error
-        ? `Save failed: ${error.message}`
-        : `Save failed: ${String(error)}`
-    );
-  }
-}
-  async function validateLicense() {
-    if (!licenseKey.trim()) {
-      setLicenseMessage("Please enter your Audius license key.");
-      setLicenseActive(false);
+  async function downloadVideoFromTauri() {
+    if (!videoUrl) {
+      alert("No generated video is available.");
       return;
     }
 
-    setIsCheckingLicense(true);
-    setLicenseMessage("");
-
     try {
-      const response = await fetch(`${API_BASE_URL}/api/license/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ licenseKey: licenseKey.trim() }),
+      const savePath = await save({
+        defaultPath: `audius-video-${Date.now()}.mp4`,
+        filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
       });
 
-      const data = await response.json();
+      if (!savePath) return;
 
-      if (!response.ok || !data.active) {
-        setLicenseActive(false);
-        setLicenseMessage(data.message ?? "License is inactive.");
-        return;
-      }
+      await invoke("save_video_from_url", {
+        videoUrl,
+        savePath,
+      });
 
-      localStorage.setItem("audius_license_key", licenseKey.trim());
-      setLicenseActive(true);
-      setLicenseMessage("License activated successfully.");
-    } catch {
-      setLicenseActive(false);
-      setLicenseMessage("Could not connect to Audius license server.");
-    } finally {
-      setIsCheckingLicense(false);
+      alert(`Video saved successfully:\n${savePath}`);
+    } catch (saveError) {
+      alert(
+        saveError instanceof Error
+          ? `Save failed: ${saveError.message}`
+          : `Save failed: ${String(saveError)}`
+      );
     }
   }
 
@@ -274,12 +223,12 @@ async function downloadVideoFromTauri() {
     event.preventDefault();
 
     if (!runtimeReady) {
-      setError("Audius runtime is missing. Please install runtime dependencies first.");
+      setError("Audius runtime is missing. Please install runtime first.");
       return;
     }
 
     if (!licenseActive) {
-      setError("Please activate your Audius license before generating videos.");
+      setError("Audius license is inactive. Please contact support.");
       return;
     }
 
@@ -299,17 +248,12 @@ async function downloadVideoFromTauri() {
     setVideoUrl(null);
 
     try {
-      const savedLicense = localStorage.getItem("audius_license_key") ?? "";
-
       const formData = new FormData();
       formData.append("file", file);
       formData.append("voiceName", voiceName);
 
       const response = await fetch(`${API_BASE_URL}/api/video/generate`, {
         method: "POST",
-        headers: {
-          "X-Audius-License": savedLicense,
-        },
         body: formData,
       });
 
@@ -373,36 +317,6 @@ async function downloadVideoFromTauri() {
               synchronized word highlighting, helping students, trainers, and
               legal teams revise faster and retain more.
             </p>
-
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <a
-                href="#generator"
-                className="rounded-2xl bg-amber-400 px-7 py-4 text-center font-black text-slate-950 shadow-xl shadow-amber-500/20 transition hover:bg-amber-300"
-              >
-                Upload legal notes
-              </a>
-              <a
-                href="#how-it-works"
-                className="rounded-2xl border border-white/15 px-7 py-4 text-center font-bold text-white transition hover:bg-white/10"
-              >
-                See how it works
-              </a>
-            </div>
-
-            <div className="mt-10 grid max-w-2xl grid-cols-3 gap-4 text-sm text-slate-300">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-2xl font-black text-white">.TXT</p>
-                <p className="mt-1">Upload notes</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-2xl font-black text-white">AI</p>
-                <p className="mt-1">Voice narration</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-2xl font-black text-white">MP4</p>
-                <p className="mt-1">Download video</p>
-              </div>
-            </div>
           </div>
 
           <div className="rounded-[2rem] border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur">
@@ -479,7 +393,7 @@ async function downloadVideoFromTauri() {
                   Audius Runtime
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  Local FFmpeg and Python runtime must be installed on this machine.
+                  Local runtime is checked automatically.
                 </p>
               </div>
 
@@ -501,6 +415,14 @@ async function downloadVideoFromTauri() {
             >
               {runtimeMessage}
             </p>
+
+            <button
+              type="button"
+              onClick={checkRuntime}
+              className="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+            >
+              Recheck Runtime
+            </button>
           </div>
 
           <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-5">
@@ -510,7 +432,7 @@ async function downloadVideoFromTauri() {
                   Audius License
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  Activate this workstation before generating videos.
+                  Audius validates the installed license automatically.
                 </p>
               </div>
 
@@ -525,34 +447,22 @@ async function downloadVideoFromTauri() {
               </span>
             </div>
 
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-              <input
-                type="text"
-                value={licenseKey}
-                onChange={(event) => setLicenseKey(event.target.value)}
-                placeholder="Enter Audius license key"
-                className="flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none ring-amber-400 focus:ring-2"
-              />
+            <p
+              className={`mt-3 text-sm font-semibold ${
+                licenseActive ? "text-green-700" : "text-red-700"
+              }`}
+            >
+              {isCheckingLicense ? "Checking license..." : licenseMessage}
+            </p>
 
-              <button
-                type="button"
-                onClick={validateLicense}
-                disabled={isCheckingLicense || !runtimeReady}
-                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:bg-slate-400"
-              >
-                {isCheckingLicense ? "Checking..." : "Activate"}
-              </button>
-            </div>
-
-            {licenseMessage && (
-              <p
-                className={`mt-3 text-sm font-semibold ${
-                  licenseActive ? "text-green-700" : "text-red-700"
-                }`}
-              >
-                {licenseMessage}
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={validateLicense}
+              disabled={!runtimeReady || isCheckingLicense}
+              className="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white disabled:bg-slate-400"
+            >
+              {isCheckingLicense ? "Checking..." : "Recheck License"}
+            </button>
           </div>
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
@@ -564,7 +474,6 @@ async function downloadVideoFromTauri() {
               <span className="block text-sm font-black text-slate-700">
                 Drag & drop your legal notes here
               </span>
-
               <span className="mt-2 block text-sm text-slate-500">
                 or click to browse a .txt file
               </span>
@@ -602,7 +511,7 @@ async function downloadVideoFromTauri() {
 
             <button
               type="submit"
-              disabled={!file || isGenerating || !licenseActive || !runtimeReady}
+              disabled={!file || isGenerating || !runtimeReady || !licenseActive}
               className="w-full rounded-2xl bg-amber-400 px-6 py-4 text-base font-black text-slate-950 shadow-lg shadow-amber-200 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
             >
               {isGenerating ? "Generating legal video..." : "Generate video"}
@@ -622,7 +531,8 @@ async function downloadVideoFromTauri() {
               <div className="mb-4 flex items-center justify-between text-sm">
                 <span>{statusMessage}</span>
                 <span>
-                  {Math.round(((statusIndex + 1) / simulatedSteps.length) * 100)}%
+                  {Math.round(((statusIndex + 1) / simulatedSteps.length) * 100)}
+                  %
                 </span>
               </div>
               <div className="h-3 overflow-hidden rounded-full bg-white/10">
@@ -648,13 +558,13 @@ async function downloadVideoFromTauri() {
 
           {videoUrl && (
             <div className="mt-8 space-y-4">
-          <button
-  type="button"
-  onClick={downloadVideoFromTauri}
-  className="block w-full rounded-2xl bg-white px-5 py-4 text-center text-sm font-black text-slate-950 transition hover:bg-amber-100"
->
-  Save generated video
-</button>
+              <button
+                type="button"
+                onClick={downloadVideoFromTauri}
+                className="block w-full rounded-2xl bg-white px-5 py-4 text-center text-sm font-black text-slate-950 transition hover:bg-amber-100"
+              >
+                Save generated video
+              </button>
 
               <button
                 type="button"
@@ -665,16 +575,15 @@ async function downloadVideoFromTauri() {
               </button>
 
               <p className="text-xs leading-5 text-slate-400">
-                Download is handled directly by Audius. If your browser blocks it,
-                use Open video in browser and save the file manually.
+                Save is handled directly by Audius.
               </p>
             </div>
           )}
 
           {!isGenerating && !error && !videoUrl && (
             <div className="mt-8 rounded-2xl border border-white/10 p-5 text-sm leading-6 text-slate-300">
-              Check runtime, activate license, upload a .txt legal note file,
-              and create your first Audius video.
+              Runtime and license are checked automatically. Upload a .txt legal
+              note file and create your first Audius video.
             </div>
           )}
         </aside>

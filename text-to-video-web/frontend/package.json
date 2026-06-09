@@ -9,7 +9,7 @@
     "lint": "next lint",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build && mkdir -p src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/scripts && cp ../backend/scripts/edge_tts_generate.py src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/scripts/edge_tts_generate.py"
+    "desktop:build": "tauri build && mkdir -p src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/scripts && cp ../backend/scripts/edge_tts_generate.py src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/scripts/edge_tts_generate.py && mkdir -p src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/runtime && cp ../backend/runtime/ffmpeg src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/runtime/ffmpeg && chmod +x src-tauri/target/release/bundle/macos/Audius.app/Contents/MacOS/runtime/ffmpeg"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",

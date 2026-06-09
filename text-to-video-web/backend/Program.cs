@@ -64,7 +64,13 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.UseCors("AudiusDesktop");
-
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(outputsDirectory),
+    RequestPath = "/outputs",
+    ContentTypeProvider = provider,
+    ServeUnknownFileTypes = true
+});
 app.MapControllers();
 
 app.Run();
